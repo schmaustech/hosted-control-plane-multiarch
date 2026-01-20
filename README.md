@@ -154,5 +154,157 @@ multiclusterengine.multicluster.openshift.io/multiclusterengine patched
 ~~~
 
 ~~~bash
+$ cat <<EOF >agent-service-config.yaml
+apiVersion: agent-install.openshift.io/v1beta1
+kind: AgentServiceConfig
+metadata:
+  name: agent
+spec:
+  databaseStorage:
+    accessModes:
+      - ReadWriteOnce
+    resources:
+      requests:
+        storage: 10Gi
+  filesystemStorage:
+    accessModes:
+      - ReadWriteOnce
+    resources:
+      requests:
+        storage: 10Gi
+  imageStorage:
+    accessModes:
+      - ReadWriteOnce
+    resources:
+      requests:
+        storage: 20Gi
+  osImages:
+    - openshiftVersion: "4.20"
+      version: 9.6.20260107-0
+      url: "https://mirror.openshift.com/pub/openshift-v4/x86_64/dependencies/rhcos/4.20/latest/rhcos-4.20.0-x86_64-live-iso.x86_64.iso"
+      rootFSUrl: "https://mirror.openshift.com/pub/openshift-v4/x86_64/dependencies/rhcos/4.20/latest/rhcos-4.20.0-x86_64-live-rootfs.x86_64.img"
+      cpuArchitecture: "x86_64"
+    - openshiftVersion: "4.20"
+      version: 9.6.20260107-0
+      url: "https://mirror.openshift.com/pub/openshift-v4/aarch64/dependencies/rhcos/4.20/latest/rhcos-4.20.0-aarch64-live-iso.aarch64.iso"
+      rootFSUrl: "https://mirror.openshift.com/pub/openshift-v4/aarch64/dependencies/rhcos/4.20/latest/rhcos-4.20.0-aarch64-live-rootfs.aarch64.img"
+      cpuArchitecture: "aarch64"
+EOF
+~~~
 
+~~~bash
+$ oc create -f agent-service-config.yaml 
+agentserviceconfig.agent-install.openshift.io/agent created
+~~~
+
+~~~bash
+$ oc get pods -n multicluster-engine
+NAME                                                   READY   STATUS    RESTARTS      AGE
+agentinstalladmission-679cd54c5f-qjvfn                 1/1     Running   0             87s
+agentinstalladmission-679cd54c5f-slj4s                 1/1     Running   0             87s
+assisted-image-service-0                               1/1     Running   0             86s
+assisted-service-587c875884-qcfb2                      2/2     Running   0             88s
+cluster-curator-controller-7c66f8b67f-hbhkr            1/1     Running   0             24h
+cluster-image-set-controller-6879c9fdf7-vhvsp          1/1     Running   0             24h
+cluster-manager-847d499df7-kb5bx                       1/1     Running   0             24h
+cluster-manager-847d499df7-w2sdj                       1/1     Running   0             24h
+cluster-manager-847d499df7-z65kp                       1/1     Running   0             24h
+cluster-proxy-addon-manager-86484759b9-mhgpg           1/1     Running   0             24h
+cluster-proxy-addon-user-5fff4bbf8-57r7v               2/2     Running   0             24h
+cluster-proxy-fbf4447f4-ch8p9                          1/1     Running   0             24h
+clusterclaims-controller-dfcf6dcd4-b4p44               2/2     Running   0             24h
+clusterlifecycle-state-metrics-v2-7c66dbd6f9-pslqq     1/1     Running   0             24h
+console-mce-console-7dbbc66784-bb292                   1/1     Running   0             24h
+discovery-operator-7997f54695-6mdct                    1/1     Running   0             24h
+hcp-cli-download-5c4dfbfd6c-lgdhz                      1/1     Running   0             24h
+hive-operator-6545b5986b-6pttn                         1/1     Running   0             24h
+hypershift-addon-manager-64797b9868-h26wg              1/1     Running   0             24h
+infrastructure-operator-5f9d89c69-k9b82                1/1     Running   1 (11h ago)   24h
+managedcluster-import-controller-v2-75b55d65bd-4h8b4   1/1     Running   1 (11h ago)   24h
+multicluster-engine-operator-6dd66fff8-gphcf           1/1     Running   0             24h
+multicluster-engine-operator-6dd66fff8-tq6mx           1/1     Running   0             24h
+ocm-controller-84964b45bb-h5hvs                        1/1     Running   0             24h
+ocm-proxyserver-8cbffb748-mj5hx                        1/1     Running   0             24h
+ocm-webhook-7d99759b8d-5dv9j                           1/1     Running   0             24h
+provider-credential-controller-6f54b788b5-zm9bd        2/2     Running   0             24h
+~~~
+
+~~~bash
+$ cat <<EOF >credentials.yaml
+apiVersion: v1
+kind: Secret
+type: Opaque
+metadata:
+  name: hcp-adlink
+  namespace: default
+  labels:
+    cluster.open-cluster-management.io/credentials: ""
+    cluster.open-cluster-management.io/type: hostinventory
+stringData:
+  baseDomain: schmaustech.com
+  pullSecret: PULL-SECRET    # Update with pull-secret 
+  ssh-publickey: SSH-KEY     # Update with ssh-key
+EOF
+~~~
+
+~~~bash
+$ oc create -f credentials.yaml 
+secret/hcp-adlink created
+~~~
+
+~~~bash
+$ cat <<EOF >infrastructure-environment.yaml
+kind: Secret
+apiVersion: v1
+metadata:
+  name: pullsecret-hcp-adlink
+  namespace: hcp-adlink
+data:
+  '.dockerconfigjson': 'PULL-SECRET-REDACTED'
+type: 'kubernetes.io/dockerconfigjson'
+---
+apiVersion: agent-install.openshift.io/v1beta1
+kind: InfraEnv
+metadata:
+  name: hcp-adlink
+  namespace: hcp-adlink
+  labels:
+    agentclusterinstalls.extensions.hive.openshift.io/location: Minneapolis
+    networkType: dhcp
+spec:
+  agentLabels:
+    'agentclusterinstalls.extensions.hive.openshift.io/location': Minneapolis
+  pullSecretRef:
+    name: pullsecret-hcp-adlink
+  sshAuthorizedKey: SSH-KEY-REDACTED
+  nmStateConfigLabelSelector:	
+      matchLabels:	
+        infraenvs.agent-install.openshift.io: hcp-adlink
+  cpuArchitecture: x86_64
+  osImageVersion: '4.20'
+status:
+  agentLabelSelector:
+    matchLabels:
+      'agentclusterinstalls.extensions.hive.openshift.io/location': Minneapolis
+---
+kind: Role
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: capi-provider-role
+  namespace: hcp-adlink
+rules:
+  - verbs:
+      - '*'
+    apiGroups:
+      - agent-install.openshift.io
+    resources:
+      - agents
+EOF
+~~~
+
+~~~bash
+$ oc create -f infrastructure-environment.yaml 
+secret/pullsecret-hcp-adlink created
+infraenv.agent-install.openshift.io/hcp-adlink created
+role.rbac.authorization.k8s.io/capi-provider-role created
 ~~~
