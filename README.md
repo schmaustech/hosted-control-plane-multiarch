@@ -241,6 +241,8 @@ ocm-webhook-7d99759b8d-5dv9j                           1/1     Running   0      
 provider-credential-controller-6f54b788b5-zm9bd        2/2     Running   0             24h
 ~~~
 
+Now that the multicluster engine is up and running we need to create a few secrets for our hosted cluster.  In this example our hosted cluster will be called hcp-adlink.   The first secret is for setting the base domain, pull-secret and ssh-key.
+
 ~~~bash
 $ cat <<EOF >credentials.yaml
 apiVersion: v1
@@ -259,10 +261,14 @@ stringData:
 EOF
 ~~~
 
+Let's create the key on the cluster.
+
 ~~~bash
 $ oc create -f credentials.yaml 
 secret/hcp-adlink created
 ~~~
+
+Next we need a secret for our infrastructure environment.  The following is an example again where our cluster name is hcp-adlink.  
 
 ~~~bash
 $ cat <<EOF >infrastructure-environment.yaml
@@ -314,9 +320,123 @@ rules:
 EOF
 ~~~
 
+Once we have generated the custom resource file we can create it on the cluster.
+
 ~~~bash
 $ oc create -f infrastructure-environment.yaml 
 secret/pullsecret-hcp-adlink created
 infraenv.agent-install.openshift.io/hcp-adlink created
 role.rbac.authorization.k8s.io/capi-provider-role created
+~~~
+
+This completes the initial configuration of multicluster engine.
+
+## Install & Configuring Metallb Operator
+
+Before we move forward with deploying a hosted control plane cluster we need to install the Metallb Operator on our cluster that will host the the hosted control plane.  The reason for this is Metallb will provide a loadbalancer and vip ipaddress for the api of our hosted cluster.   The first step here is to install the Metallb Operator using the following custom resource file.
+
+~~~bash
+$ cat <<EOF >metallb-operator.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: metallb-system
+---
+apiVersion: operators.coreos.com/v1
+kind: OperatorGroup
+metadata:
+  name: metallb-operator
+  namespace: metallb-system
+---
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: metallb-operator-sub
+  namespace: metallb-system
+spec:
+  channel: stable
+  name: metallb-operator
+  source: redhat-operators
+  sourceNamespace: openshift-marketplace
+EOF
+~~~
+
+With the custom resource file generated we can create the resources on the cluster.
+
+~~~bash
+$ oc create -f metallb-operator.yaml
+namespace/metallb-system created
+operatorgroup.operators.coreos.com/metallb-operator created
+subscription.operators.coreos.com/metallb-operator-sub created
+~~~
+
+Next we have to generate a MetalLB instance using the following custom resource file.
+
+~~~bash
+$ cat <<EOF >metallb-instance.yaml
+apiVersion: metallb.io/v1beta1
+kind: MetalLB
+metadata:
+  name: metallb
+  namespace: metallb-system
+EOF
+~~~
+
+With the custom resource file generated we can create the resource on the cluster.
+
+~~~bash
+$ oc create -f metallb-instance.yaml
+metallb.metallb.io/metallb created
+~~~
+
+Finally we can check and see if all our MetalLB pods are up and running.
+
+~~~bash
+$ oc get pods -n metallb-system
+NAME                                                   READY   STATUS    RESTARTS   AGE
+controller-7f78f89f5f-hj4vb                            2/2     Running   0          28s
+metallb-operator-controller-manager-84544fc95f-pfm89   1/1     Running   0          3m28s
+metallb-operator-webhook-server-644c4c9758-5t6xm       1/1     Running   0          3m27s
+speaker-55xt7                                          2/2     Running   0          28s
+speaker-kclzj                                          2/2     Running   0          28s
+speaker-mdjjn                                          2/2     Running   0          28s
+~~~
+
+If the pods are up and running we have two more steps we need to take.  The first is to generate a IPAddressPool for MetalLB so it knows where to get the ipaddresses for resources like our hosted control plane when they request it.  We can use the following custom resource file to accomplish that.
+
+~~~bash
+$ cat <<EOF >metallb-ipaddresspool.yaml
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: hcp-network
+  namespace: metallb-system
+spec:
+  addresses:
+    - 192.168.0.170-192.168.0.172
+  autoAssign: true
+~~~
+
+With the custom resource file generated we can create the resource on the cluster.
+
+~~~bash
+$ oc create -f metallb-ipaddresspool.yaml
+ipaddresspool.metallb.io/hcp-network created
+~~~
+
+~~~bash
+$ cat metallb-l2advertisement.yaml
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: advertise-hcp-network
+  namespace: metallb-system
+spec:
+  ipAddressPools:
+    - hcp-network
+~~~
+
+~~~bash
+$ oc create -f metallb-l2advertisement.yaml
+l2advertisement.metallb.io/advertise-hcp-network created
 ~~~
