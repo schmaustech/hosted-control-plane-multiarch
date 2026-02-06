@@ -159,6 +159,14 @@ $ oc patch mce multiclusterengine --type=merge -p   '{"spec":{"overrides":{"comp
 multiclusterengine.multicluster.openshift.io/multiclusterengine patched
 ~~~
 
+We can validate it's enabled with the following.
+
+~~~bash
+$ oc get managedclusteraddons -n local-cluster hypershift-addon
+NAME               AVAILABLE   DEGRADED   PROGRESSING
+hypershift-addon   True        False      False
+~~~
+
 We also need to create a provisioning configuration.
 
 ~~~bash
@@ -170,6 +178,7 @@ metadata:
 spec:
   provisioningNetwork: "Disabled"
   watchAllNamespaces: true
+EOF
 ~~~
 
 Then create the provisioning configuration on the cluster.
