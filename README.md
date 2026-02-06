@@ -159,6 +159,26 @@ $ oc patch mce multiclusterengine --type=merge -p   '{"spec":{"overrides":{"comp
 multiclusterengine.multicluster.openshift.io/multiclusterengine patched
 ~~~
 
+We also need to create a provisioning configuration.
+
+~~~bash
+$ cat <<EOF >provisioning-config.yaml 
+apiVersion: metal3.io/v1alpha1
+kind: Provisioning
+metadata:
+  name: provisioning-configuration
+spec:
+  provisioningNetwork: "Disabled"
+  watchAllNamespaces: true
+~~~
+
+Then create the provisioning configuration on the cluster.
+
+~~~bash
+$ oc create -f provisioning-config.yaml
+provisioning.metal3.io/provisioning-configuration created
+~~~
+
 Now that hosted control planes are enabled we need to create a AgentServiceConfig custom resource file.  In mine I am defining the specific OpenShift version and architectures I want: 4.20, x86 and Aarch64.
 
 ~~~bash
