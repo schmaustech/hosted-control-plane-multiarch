@@ -288,7 +288,7 @@ $ oc create -f credentials.yaml
 secret/hcp-adlink created
 ~~~
 
-Next we need a secret for our infrastructure environment.  The following is an example again where our cluster name is hcp-adlink. Also notice here that we are defining the CPU architecture here as aarch64 since our hosted workers will be aarch64.
+Next we need a secret for our infrastructure environment.  The following is an example again where our cluster name is hcp-adlink. Also notice here that we are defining the CPU architecture here as aarch64 since our hosted workers will be arm64.
 
 ~~~bash
 $ cat <<EOF >infrastructure-environment.yaml
@@ -318,7 +318,7 @@ spec:
   nmStateConfigLabelSelector:	
       matchLabels:	
         infraenvs.agent-install.openshift.io: hcp-adlink
-  cpuArchitecture: aarch64
+  cpuArchitecture: arm64
   osImageVersion: '4.20'
 status:
   agentLabelSelector:
