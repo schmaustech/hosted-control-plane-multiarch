@@ -115,10 +115,14 @@ spec:
 EOF
 ~~~
 
+With the custom resource file generated we can create it on the cluster.
+
 ~~~bash
 $ oc create -f multicluster-engine-instance.yaml 
 multiclusterengine.multicluster.openshift.io/multiclusterengine created
 ~~~
+
+Once the multicluster engine is up and running we should see the following pods under the multicluster-engine namespace.
 
 ~~~bash
 $ oc get pods -n multicluster-engine
@@ -148,10 +152,14 @@ ocm-webhook-7d99759b8d-5dv9j                           1/1     Running   0      
 provider-credential-controller-6f54b788b5-zm9bd        2/2     Running   0          8m30s
 ~~~
 
+Next we need to patch the multicluster-engine to enable hosted control planes (aka hypershift).
+
 ~~~bash
 $ oc patch mce multiclusterengine --type=merge -p   '{"spec":{"overrides":{"components":[{"name":"hypershift","enabled": true}]}}}'
 multiclusterengine.multicluster.openshift.io/multiclusterengine patched
 ~~~
+
+Now that hosted control planes are enabled we need to create a AgentServiceConfig custom resource file.  In mine I am defining the specific OpenShift version and architectures I want: 4.20, x86 and Aarch64.
 
 ~~~bash
 $ cat <<EOF >agent-service-config.yaml
@@ -192,10 +200,14 @@ spec:
 EOF
 ~~~
 
+With the AgentServiceConfig custom resource file generated let's create it on the cluster.
+
 ~~~bash
 $ oc create -f agent-service-config.yaml 
 agentserviceconfig.agent-install.openshift.io/agent created
 ~~~
+
+We can validate that the agent service is running by finding the assisted-image-service and assisted-service running under the multicluster-engine namespace.
 
 ~~~bash
 $ oc get pods -n multicluster-engine
