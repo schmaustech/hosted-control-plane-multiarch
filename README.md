@@ -15,8 +15,7 @@ All of these benefits make HCP an attractive solution for businesses looking to 
 
 The base environment started with an x86 architecture of OpenShift 4.20.8 installed in a hyperconverged three node control/worker setup on virtual machines.  The environment is depicted in the followng diagram:
 
-
-
+<img src="" style="width: 1000px;" border=0/>
 
 These three nodes also have Red Hat OpenShift Data Foundation installed to provide the backing storage for MultiCluster Engine which is the basis for HCP.  Since we are going to be deploying an HCP cluster made up of Arm worker nodes let's first confirm the cluster has multi architecture enabled.
 
@@ -683,6 +682,11 @@ oc get secret -n hcp-adlink hcp-adlink-admin-kubeconfig  -ojsonpath='{.data.kube
 ~~~
 
 ~~~bash
+$ oc get secret -n hcp-adlink hcp-adlink-kubeadmin-password  -ojsonpath='{.data.password}'| base64 -d
+h9DyP-tcHpQ-CxBDP-dqVt6
+~~~
+
+~~~bash
 $ oc get co
 NAME                                       VERSION   AVAILABLE   PROGRESSING   DEGRADED   SINCE   MESSAGE
 console                                    4.20.13   False       False         True       88m     RouteHealthAvailable: failed to GET route (https://console-openshift-console.apps.hcp-adlink.schmaustech.com): Get "https://console-openshift-console.apps.hcp-adlink.schmaustech.com": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
@@ -898,5 +902,11 @@ Escape character is '^]'.
 ^]
 telnet> quit
 Connection closed.
+~~~
+
+~~~bash
+$ oc get hostedcluster -n hcp-adlink
+NAME         VERSION   KUBECONFIG                    PROGRESS    AVAILABLE   PROGRESSING   MESSAGE
+hcp-adlink   4.20.13   hcp-adlink-admin-kubeconfig   Completed   True        False         The hosted control plane is available
 ~~~
 
