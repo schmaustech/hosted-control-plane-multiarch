@@ -683,9 +683,220 @@ oc get secret -n hcp-adlink hcp-adlink-admin-kubeconfig  -ojsonpath='{.data.kube
 ~~~
 
 ~~~bash
-
+$ oc get co
+NAME                                       VERSION   AVAILABLE   PROGRESSING   DEGRADED   SINCE   MESSAGE
+console                                    4.20.13   False       False         True       88m     RouteHealthAvailable: failed to GET route (https://console-openshift-console.apps.hcp-adlink.schmaustech.com): Get "https://console-openshift-console.apps.hcp-adlink.schmaustech.com": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+csi-snapshot-controller                    4.20.13   True        False         False      112m    
+dns                                        4.20.13   True        False         False      87m     
+image-registry                             4.20.13   True        False         False      88m     
+ingress                                    4.20.13   True        False         True       111m    The "default" ingress controller reports Degraded=True: DegradedConditions: One or more other status conditions indicate a degraded state: CanaryChecksSucceeding=False (CanaryChecksRepetitiveFailures: Canary route checks for the default ingress controller are failing. Last 2 error messages:...
+insights                                   4.20.13   True        False         False      89m     
+kube-apiserver                             4.20.13   True        False         False      112m    
+kube-controller-manager                    4.20.13   True        False         False      112m    
+kube-scheduler                             4.20.13   True        False         False      112m    
+kube-storage-version-migrator              4.20.13   True        False         False      89m     
+monitoring                                 4.20.13   True        False         False      80m     
+network                                    4.20.13   True        False         False      90m     
+node-tuning                                4.20.13   True        False         False      96m     
+openshift-apiserver                        4.20.13   True        False         False      112m    
+openshift-controller-manager               4.20.13   True        False         False      112m    
+openshift-samples                          4.20.13   True        False         False      87m     
+operator-lifecycle-manager                 4.20.13   True        False         False      112m    
+operator-lifecycle-manager-catalog         4.20.13   True        False         False      112m    
+operator-lifecycle-manager-packageserver   4.20.13   True        False         False      112m    
+service-ca                                 4.20.13   True        False         False      89m     
+storage                                    4.20.13   True        False         False      112m    
 ~~~
 
 ~~~bash
-
+$ cat <<EOF >metallb-operator.yaml 
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: metallb-system
+---
+apiVersion: operators.coreos.com/v1
+kind: OperatorGroup
+metadata:
+  name: metallb-operator
+  namespace: metallb-system
+---
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: metallb-operator-sub
+  namespace: metallb-system
+spec:
+  channel: stable
+  name: metallb-operator
+  source: redhat-operators 
+  sourceNamespace: openshift-marketplace
+EOF
 ~~~
+
+~~~bash
+$ oc create -f metallb-operator.yaml
+namespace/metallb-system created
+operatorgroup.operators.coreos.com/metallb-operator created
+subscription.operators.coreos.com/metallb-operator-sub created
+~~~
+
+~~~bash
+$ cat <<EOF >metallb-instance.yaml
+apiVersion: metallb.io/v1beta1
+kind: MetalLB
+metadata:
+  name: metallb
+  namespace: metallb-system
+EOF
+~~~
+
+~~~bash
+$ oc create -f metallb-instance.yaml
+metallb.metallb.io/metallb created
+~~~
+
+~~~bash
+$ oc get pods -n metallb-system
+NAME                                                  READY   STATUS    RESTARTS   AGE
+controller-7f78f89f5f-94m87                           2/2     Running   0          29s
+metallb-operator-controller-manager-76f58797d-69jdm   1/1     Running   0          92s
+metallb-operator-webhook-server-6d96484469-5z87l      1/1     Running   0          90s
+speaker-72wfx                                         1/2     Running   0          29s
+speaker-8h9vh                                         2/2     Running   0          29s
+speaker-t455x                                         2/2     Running   0          29s
+~~~
+
+~~~bash
+$ cat <<EOF >metallb-ipaddresspool.yaml
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: hcp-network
+  namespace: metallb-system
+spec:
+  addresses:
+    - 192.168.0.173-192.168.0.175
+  autoAssign: true
+EOF
+~~~
+
+~~~bash
+$ oc create -f metallb-ipaddresspool.yaml
+ipaddresspool.metallb.io/hcp-network created
+~~~
+
+~~~bash
+$ cat <<EOF >metallb-l2advertisement.yaml
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: advertise-hcp-network
+  namespace: metallb-system
+spec:
+  ipAddressPools:
+    - hcp-network
+EOF
+~~~
+
+~~~bash
+$ oc create -f metallb-l2advertisement.yaml
+l2advertisement.metallb.io/advertise-hcp-network created
+~~~
+
+~~~bash
+$ oc get ipaddresspool -n metallb-system -o yaml
+apiVersion: v1
+items:
+- apiVersion: metallb.io/v1beta1
+  kind: IPAddressPool
+  metadata:
+    creationTimestamp: "2026-02-07T20:03:50Z"
+    generation: 1
+    name: hcp-network
+    namespace: metallb-system
+    resourceVersion: "21540"
+    uid: 6bf55fee-d634-4789-a19e-8ce505ba8efb
+  spec:
+    addresses:
+    - 192.168.0.173-192.168.0.175
+    autoAssign: true
+    avoidBuggyIPs: false
+  status:
+    assignedIPv4: 0
+    assignedIPv6: 0
+    availableIPv4: 3
+    availableIPv6: 0
+kind: List
+metadata:
+  resourceVersion: ""
+~~~
+
+~~~bash
+$ cat <<EOF >hcp-adlink-metallb-ingress.yaml
+kind: Service
+apiVersion: v1
+metadata:
+  annotations:
+   metallb.io/address-pool: hcp-network
+  name: metallb-ingress
+  namespace: openshift-ingress
+spec:
+  ports:
+    - name: http
+      protocol: TCP
+      port: 80
+      targetPort: 80
+    - name: https
+      protocol: TCP
+      port: 443
+      targetPort: 443
+  selector:
+    ingresscontroller.operator.openshift.io/deployment-ingresscontroller: default
+  type: LoadBalancer
+EOF
+~~~
+
+~~~bash
+$ oc get service -n openshift-ingress
+NAME                      TYPE           CLUSTER-IP      EXTERNAL-IP     PORT(S)                      AGE
+metallb-ingress           LoadBalancer   172.31.54.206   192.168.0.173   80:31492/TCP,443:30929/TCP   9s
+router-internal-default   ClusterIP      172.31.142.3    <none>          80/TCP,443/TCP,1936/TCP      119m
+~~~
+
+~~~bash
+$ oc get co
+NAME                                       VERSION   AVAILABLE   PROGRESSING   DEGRADED   SINCE   MESSAGE
+console                                    4.20.13   True        False         False      83s     
+csi-snapshot-controller                    4.20.13   True        False         False      121m    
+dns                                        4.20.13   True        False         False      96m     
+image-registry                             4.20.13   True        False         False      97m     
+ingress                                    4.20.13   True        False         False      120m    
+insights                                   4.20.13   True        False         False      98m     
+kube-apiserver                             4.20.13   True        False         False      121m    
+kube-controller-manager                    4.20.13   True        False         False      121m    
+kube-scheduler                             4.20.13   True        False         False      121m    
+kube-storage-version-migrator              4.20.13   True        False         False      97m     
+monitoring                                 4.20.13   True        False         False      89m     
+network                                    4.20.13   True        False         False      98m     
+node-tuning                                4.20.13   True        False         False      105m    
+openshift-apiserver                        4.20.13   True        False         False      121m    
+openshift-controller-manager               4.20.13   True        False         False      121m    
+openshift-samples                          4.20.13   True        False         False      96m     
+operator-lifecycle-manager                 4.20.13   True        False         False      121m    
+operator-lifecycle-manager-catalog         4.20.13   True        False         False      121m    
+operator-lifecycle-manager-packageserver   4.20.13   True        False         False      121m    
+service-ca                                 4.20.13   True        False         False      98m     
+storage                                    4.20.13   True        False         False      121m 
+~~~
+
+~~~bash
+$ telnet console-openshift-console.apps.hcp-adlink.schmaustech.com 443
+Trying 192.168.0.173...
+Connected to console-openshift-console.apps.hcp-adlink.schmaustech.com.
+Escape character is '^]'.
+^]
+telnet> quit
+Connection closed.
+~~~
+
