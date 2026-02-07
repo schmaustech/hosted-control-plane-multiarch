@@ -346,6 +346,14 @@ infraenv.agent-install.openshift.io/hcp-adlink created
 role.rbac.authorization.k8s.io/capi-provider-role created
 ~~~
 
+We can also see our infrastructure environment here.
+
+~~~bash
+$ oc get infraenv -n hcp-adlink
+NAME         ISO CREATED AT
+hcp-adlink   2026-02-07T15:59:38Z
+~~~
+
 This completes the initial configuration of multicluster engine.
 
 ## Install & Configuring Metallb Operator
@@ -442,7 +450,7 @@ ipaddresspool.metallb.io/hcp-network created
 ~~~
 
 ~~~bash
-$ cat metallb-l2advertisement.yaml
+$ cat <<EOF >metallb-l2advertisement.yaml
 apiVersion: metallb.io/v1beta1
 kind: L2Advertisement
 metadata:
@@ -456,4 +464,228 @@ spec:
 ~~~bash
 $ oc create -f metallb-l2advertisement.yaml
 l2advertisement.metallb.io/advertise-hcp-network created
+~~~
+
+This completes the steps of configuration for MetalLB on the cluster that will host our hosted control plane.
+
+## Deploying a Hosted Control Plane Cluster
+
+In previous steps we went ahead and configured MultiCluster Engine Operator and Hosted Control Planes along with creating an infrastructure environment.   At this point we are almost ready to deploy a hosted control plane cluster but we first need to add some nodes to our infrastructure environment.   To do this we will first extract the minimal ISO from our infrastructure environment.
+
+~~~bash
+$ oc get infraenv -n hcp-adlink hcp-adlink -o jsonpath='{.status.isoDownloadURL}' | sed s/minimal-iso/full-iso/g | xargs curl -kLo ~/discovery-hcp-adlink.iso
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+100 98.3M  100 98.3M    0     0  10.8M      0  0:00:09  0:00:09 --:--:-- 10.8M
+
+$ ls -lh ~/discovery-hcp-adlink.iso 
+-rw-r--r--. 1 bschmaus bschmaus 99M Feb  7 10:08 /home/bschmaus/discovery-hcp-adlink.iso
+~~~
+
+We are not going to take that discovery-hcp-adlink.iso and boot it on a few of our Arm64 nodes.  After letting the nodes boot and waiting a few minutes we can see they have shown up under our agent pool in the hcp-adlink namespace.
+
+~~~bash
+$ oc get agent -n hcp-adlink
+NAME                                   CLUSTER   APPROVED   ROLE          STAGE
+0589f6a3-fb83-4f60-b4d4-3617c7023ca7             false      auto-assign   
+5c9e6934-ea82-45b0-ab01-acb0626d86c5             false      auto-assign   
+8c2920ce-6d30-4276-b51e-04ce22dcfae6             false      auto-assign  
+~~~
+
+Currently the nodes are not marked as approved so we need to approve them to make them usable in agent pool.
+
+~~~bash
+$ oc get agent -n hcp-adlink -ojson | jq -r '.items[] | select(.spec.approved==false) | .metadata.name'| xargs oc -n hcp-adlink patch -p '{"spec":{"approved":true}}' --type merge agent
+agent.agent-install.openshift.io/0589f6a3-fb83-4f60-b4d4-3617c7023ca7 patched
+agent.agent-install.openshift.io/5c9e6934-ea82-45b0-ab01-acb0626d86c5 patched
+agent.agent-install.openshift.io/8c2920ce-6d30-4276-b51e-04ce22dcfae6 patched
+
+$ oc get agent -n hcp-adlink
+NAME                                   CLUSTER   APPROVED   ROLE          STAGE
+0589f6a3-fb83-4f60-b4d4-3617c7023ca7             true       auto-assign   
+5c9e6934-ea82-45b0-ab01-acb0626d86c5             true       auto-assign   
+8c2920ce-6d30-4276-b51e-04ce22dcfae6             true       auto-assign   
+~~~
+
+~~~bash
+$ cat <<EOF >hosted-cluster-deployment.yaml 
+---
+apiVersion: hypershift.openshift.io/v1beta1
+kind: HostedCluster
+metadata:
+  name: 'hcp-adlink'
+  namespace: 'hcp-adlink'
+  labels:
+    "cluster.open-cluster-management.io/clusterset": 'default'
+spec:
+  release:
+    image: quay.io/openshift-release-dev/ocp-release:4.20.13-multi
+  pullSecret:
+    name: pullsecret-cluster-hcp-adlink
+  sshKey:
+    name: sshkey-cluster-hcp-adlink
+  networking:
+    clusterNetwork:
+      - cidr: 10.132.0.0/14
+    serviceNetwork:
+      - cidr: 172.31.0.0/16
+    networkType: OVNKubernetes
+  controllerAvailabilityPolicy: SingleReplica
+  infrastructureAvailabilityPolicy: SingleReplica
+  olmCatalogPlacement: guest
+  platform:
+    type: Agent
+    agent:
+      agentNamespace: 'hcp-adlink'
+  infraID: 'hcp-adlink'
+  dns:
+    baseDomain: 'schmaustech.com'
+  services:
+  - service: APIServer
+    servicePublishingStrategy:
+      type: LoadBalancer
+  - service: OAuthServer
+    servicePublishingStrategy:
+      type: Route
+  - service: OIDC
+    servicePublishingStrategy:
+      type: Route
+  - service: Konnectivity
+    servicePublishingStrategy:
+      type: Route
+  - service: Ignition
+    servicePublishingStrategy:
+      type: Route
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: pullsecret-cluster-hcp-adlink
+  namespace: hcp-adlink
+data:
+  '.dockerconfigjson': <REDACTED PULL SECRET>
+type: kubernetes.io/dockerconfigjson
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: sshkey-cluster-hcp-adlink
+  namespace: 'hcp-adlink'
+stringData:
+  id_rsa.pub: <REDACTED SSH-KEY>
+---
+apiVersion: hypershift.openshift.io/v1beta1
+kind: NodePool
+metadata:
+  name: 'nodepool-hcp-adlink-1'
+  namespace: 'hcp-adlink'
+spec:
+  clusterName: 'hcp-adlink'
+  replicas: 3
+  management:
+    autoRepair: false
+    upgradeType: InPlace
+  platform:
+    type: Agent
+    agent:
+      agentLabelSelector:
+        matchLabels: {}
+  release:
+    image: quay.io/openshift-release-dev/ocp-release:4.20.13-multi
+---
+apiVersion: cluster.open-cluster-management.io/v1
+kind: ManagedCluster
+metadata:
+  annotations:
+    import.open-cluster-management.io/hosting-cluster-name: local-cluster 
+    import.open-cluster-management.io/klusterlet-deploy-mode: Hosted
+    open-cluster-management/created-via: hypershift
+  labels:
+    cloud: BareMetal
+    vendor: OpenShift
+    name: 'hcp-adlink'
+    cluster.open-cluster-management.io/clusterset: 'default'
+  name: 'hcp-adlink'
+spec:
+  hubAcceptsClient: true
+---
+~~~
+
+~~~bash
+$ oc create -f hosted-cluster-deployment.yaml 
+hostedcluster.hypershift.openshift.io/hcp-adlink created
+secret/pullsecret-cluster-hcp-adlink created
+secret/sshkey-cluster-hcp-adlink created
+nodepool.hypershift.openshift.io/nodepool-hcp-adlink-1 created
+managedcluster.cluster.open-cluster-management.io/hcp-adlink created
+~~~
+
+~~~bash
+$ oc get hostedcluster -n hcp-adlink
+NAME         VERSION   KUBECONFIG   PROGRESS   AVAILABLE   PROGRESSING   MESSAGE
+hcp-adlink                          Partial    False       False         Cluster infrastructure is still provisioning
+
+$ oc get hostedcluster -n hcp-adlink
+NAME         VERSION   KUBECONFIG   PROGRESS   AVAILABLE   PROGRESSING   MESSAGE
+hcp-adlink                          Partial    False       False         Waiting for hosted control plane kubeconfig to be created
+
+$ oc get hostedcluster -n hcp-adlink
+NAME         VERSION   KUBECONFIG                    PROGRESS   AVAILABLE   PROGRESSING   MESSAGE
+hcp-adlink             hcp-adlink-admin-kubeconfig   Partial    True        False         The hosted control plane is available
+~~~
+
+~~~bash
+$ oc get nodepool nodepool-hcp-adlink-1 -n hcp-adlink
+NAME                    CLUSTER      DESIRED NODES   CURRENT NODES   AUTOSCALING   AUTOREPAIR   VERSION   UPDATINGVERSION   UPDATINGCONFIG   MESSAGE
+nodepool-hcp-adlink-1   hcp-adlink   3                               False         False        4.20.13   False             False            Scaling up MachineSet to 3 replicas (actual 0)
+~~~
+
+~~~bash
+$ oc get agent -n hcp-adlink
+NAME                                   CLUSTER      APPROVED   ROLE          STAGE
+0589f6a3-fb83-4f60-b4d4-3617c7023ca7   hcp-adlink   true       auto-assign   
+5c9e6934-ea82-45b0-ab01-acb0626d86c5   hcp-adlink   true       auto-assign   
+8c2920ce-6d30-4276-b51e-04ce22dcfae6   hcp-adlink   true       auto-assign
+
+$ oc get agent -n hcp-adlink
+NAME                                   CLUSTER      APPROVED   ROLE     STAGE
+0589f6a3-fb83-4f60-b4d4-3617c7023ca7   hcp-adlink   true       worker   Rebooting
+5c9e6934-ea82-45b0-ab01-acb0626d86c5   hcp-adlink   true       worker   Rebooting
+8c2920ce-6d30-4276-b51e-04ce22dcfae6   hcp-adlink   true       worker   Rebooting
+
+$ oc get agent -n hcp-adlink
+NAME                                   CLUSTER      APPROVED   ROLE     STAGE
+0589f6a3-fb83-4f60-b4d4-3617c7023ca7   hcp-adlink   true       worker   Joined
+5c9e6934-ea82-45b0-ab01-acb0626d86c5   hcp-adlink   true       worker   Joined
+8c2920ce-6d30-4276-b51e-04ce22dcfae6   hcp-adlink   true       worker   Joined
+
+$ oc get agent -n hcp-adlink
+NAME                                   CLUSTER      APPROVED   ROLE     STAGE
+0589f6a3-fb83-4f60-b4d4-3617c7023ca7   hcp-adlink   true       worker   Done
+5c9e6934-ea82-45b0-ab01-acb0626d86c5   hcp-adlink   true       worker   Done
+8c2920ce-6d30-4276-b51e-04ce22dcfae6   hcp-adlink   true       worker   Done
+~~~
+
+~~~bash
+$ oc get nodepool nodepool-hcp-adlink-1 -n hcp-adlink
+NAME                    CLUSTER      DESIRED NODES   CURRENT NODES   AUTOSCALING   AUTOREPAIR   VERSION   UPDATINGVERSION   UPDATINGCONFIG   MESSAGE
+nodepool-hcp-adlink-1   hcp-adlink   3               3               False         False        4.20.13   False             False 
+~~~
+
+~~~bash
+$ oc get hostedcluster -n hcp-adlink
+NAME         VERSION   KUBECONFIG                    PROGRESS   AVAILABLE   PROGRESSING   MESSAGE
+hcp-adlink             hcp-adlink-admin-kubeconfig   Partial    True        False         The hosted control plane is available
+~~~
+
+~~~bash
+oc get secret -n hcp-adlink hcp-adlink-admin-kubeconfig  -ojsonpath='{.data.kubeconfig}'| base64 -d > ~/kubeconfig-hcp-adlink
+~~~
+
+~~~bash
+
+~~~
+
+~~~bash
+
 ~~~
