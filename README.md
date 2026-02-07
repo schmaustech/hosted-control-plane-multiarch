@@ -353,7 +353,7 @@ hcp-adlink   2026-02-07T15:59:38Z
 
 This completes the initial configuration of multicluster engine.
 
-## Install & Configuring Metallb Operator
+## Install & Configuring Metallb Operator Host Cluster
 
 Before we move forward with deploying a hosted control plane cluster we need to install the Metallb Operator on our cluster that will host the the hosted control plane.  The reason for this is Metallb will provide a loadbalancer and vip ipaddress for the api of our hosted cluster.   The first step here is to install the Metallb Operator using the following custom resource file.
 
@@ -504,6 +504,8 @@ NAME                                   CLUSTER   APPROVED   ROLE          STAGE
 8c2920ce-6d30-4276-b51e-04ce22dcfae6             true       auto-assign   
 ~~~
 
+At this point we are ready to create our HostedCluster.  The following HostedCluster resource file depicts the setting for deploying a cluster called hcp-adlink which will be deployed with OpenShift 4.20.13 and request 3 worker nodes from our agent nodepool.
+
 ~~~bash
 $ cat <<EOF >hosted-cluster-deployment.yaml 
 ---
@@ -608,6 +610,8 @@ spec:
 ---
 ~~~
 
+Once we have generated the HostedCluster custom resource file we can create it on our cluster.  Notice we are generating a few different resources here all related to our hcp-adlink cluster.
+
 ~~~bash
 $ oc create -f hosted-cluster-deployment.yaml 
 hostedcluster.hypershift.openshift.io/hcp-adlink created
@@ -616,6 +620,8 @@ secret/sshkey-cluster-hcp-adlink created
 nodepool.hypershift.openshift.io/nodepool-hcp-adlink-1 created
 managedcluster.cluster.open-cluster-management.io/hcp-adlink created
 ~~~
+
+Once the resources are created we can look at the state of the HostedCluster by using the following command.  As the creation progress the information under messages changes.  If one wanted to watch this in realtime they could pass the `-w` flag which will monitor the state similar to the `watch` command.
 
 ~~~bash
 $ oc get hostedcluster -n hcp-adlink
@@ -631,11 +637,15 @@ NAME         VERSION   KUBECONFIG                    PROGRESS   AVAILABLE   PROG
 hcp-adlink             hcp-adlink-admin-kubeconfig   Partial    True        False         The hosted control plane is available
 ~~~
 
+Besides monitoring the HostedCluster creation we can also observer the nodepool state as the worker nodes are being scaled up.
+
 ~~~bash
 $ oc get nodepool nodepool-hcp-adlink-1 -n hcp-adlink
 NAME                    CLUSTER      DESIRED NODES   CURRENT NODES   AUTOSCALING   AUTOREPAIR   VERSION   UPDATINGVERSION   UPDATINGCONFIG   MESSAGE
 nodepool-hcp-adlink-1   hcp-adlink   3                               False         False        4.20.13   False             False            Scaling up MachineSet to 3 replicas (actual 0)
 ~~~
+
+We can monitor the worker node states from the agent and see their progression from being assigned to the hcp-adlink cluster, them rebooting after the initial RHCOS image is layed down, them joining the cluster and finally the process being completed.   We can watch this by either manually running the command below multiple times or by adding a `-w` to the end of the command to make it behave like a `watch` command.
 
 ~~~bash
 $ oc get agent -n hcp-adlink
@@ -663,11 +673,15 @@ NAME                                   CLUSTER      APPROVED   ROLE     STAGE
 8c2920ce-6d30-4276-b51e-04ce22dcfae6   hcp-adlink   true       worker   Done
 ~~~
 
+Once the agent list shows the nodes in a complete state we can go back to the nodepool command and see that the cluster has scaled to the desired number of nodes.
+
 ~~~bash
 $ oc get nodepool nodepool-hcp-adlink-1 -n hcp-adlink
 NAME                    CLUSTER      DESIRED NODES   CURRENT NODES   AUTOSCALING   AUTOREPAIR   VERSION   UPDATINGVERSION   UPDATINGCONFIG   MESSAGE
 nodepool-hcp-adlink-1   hcp-adlink   3               3               False         False        4.20.13   False             False 
 ~~~
+
+We can then go back and look at the state of the HostedCluster.  Here we can see the progress is still partial even though the worker nodes have joined and the control plane is up.
 
 ~~~bash
 $ oc get hostedcluster -n hcp-adlink
@@ -675,14 +689,16 @@ NAME         VERSION   KUBECONFIG                    PROGRESS   AVAILABLE   PROG
 hcp-adlink             hcp-adlink-admin-kubeconfig   Partial    True        False         The hosted control plane is available
 ~~~
 
-~~~bash
-oc get secret -n hcp-adlink hcp-adlink-admin-kubeconfig  -ojsonpath='{.data.kubeconfig}'| base64 -d > ~/kubeconfig-hcp-adlink
-~~~
+To explore why the HostedCluster is still in a partial state we should extract the kubeconfig config from our hosted cluster.  While we are at it let's also get the kubeadmin password.
 
 ~~~bash
+oc get secret -n hcp-adlink hcp-adlink-admin-kubeconfig  -ojsonpath='{.data.kubeconfig}'| base64 -d > ~/kubeconfig-hcp-adlink
+
 $ oc get secret -n hcp-adlink hcp-adlink-kubeadmin-password  -ojsonpath='{.data.password}'| base64 -d
 h9DyP-tcHpQ-CxBDP-dqVt6
 ~~~
+
+Now that we have the kubeconfig from our HostedCluster let's export it to the KUBECONFIG variable and take a look at the HostedCluster operators output.  We can see that we still have a few issues with our cluster.  Specifically the ingress operator and the console operator.
 
 ~~~bash
 $ oc get co
@@ -710,6 +726,12 @@ service-ca                                 4.20.13   True        False         F
 storage                                    4.20.13   True        False         False      112m    
 ~~~
 
+The reason for the issues with the operators above is because we currently do not have anything answering for our ingress virtual ipaddress.   We have to enable that and to do so requires the MetalLB Operator to be installed on our HostedCluster.
+
+## Install & Configuring Metallb Operator on Hosted Cluster
+
+Since we need the MetalLB Operator on our HostedCluster let's go ahead and start by creating the same custom resource we used on the host cluster.
+
 ~~~bash
 $ cat <<EOF >metallb-operator.yaml 
 apiVersion: v1
@@ -736,12 +758,16 @@ spec:
 EOF
 ~~~
 
+Once we have generated the file we can create the operator on our cluster.
+
 ~~~bash
 $ oc create -f metallb-operator.yaml
 namespace/metallb-system created
 operatorgroup.operators.coreos.com/metallb-operator created
 subscription.operators.coreos.com/metallb-operator-sub created
 ~~~
+
+We also need to create the MetalLB instance as well.
 
 ~~~bash
 $ cat <<EOF >metallb-instance.yaml
@@ -753,10 +779,14 @@ metadata:
 EOF
 ~~~
 
+Once we have generated the file we can create the instance on our cluster.
+
 ~~~bash
 $ oc create -f metallb-instance.yaml
 metallb.metallb.io/metallb created
 ~~~
+
+Let's do a quick spot check of the pods to ensure everything looks right.
 
 ~~~bash
 $ oc get pods -n metallb-system
@@ -768,6 +798,8 @@ speaker-72wfx                                         1/2     Running   0       
 speaker-8h9vh                                         2/2     Running   0          29s
 speaker-t455x                                         2/2     Running   0          29s
 ~~~
+
+Just like on the host cluster we also need to create a IPAddressPool for MetalLB.
 
 ~~~bash
 $ cat <<EOF >metallb-ipaddresspool.yaml
@@ -783,10 +815,14 @@ spec:
 EOF
 ~~~
 
+Once we have the file let's create it on the cluster.
+
 ~~~bash
 $ oc create -f metallb-ipaddresspool.yaml
 ipaddresspool.metallb.io/hcp-network created
 ~~~
+
+We also need to configure the L2 advertisement.
 
 ~~~bash
 $ cat <<EOF >metallb-l2advertisement.yaml
@@ -801,10 +837,14 @@ spec:
 EOF
 ~~~
 
+Once we have the file we can create it on the cluster.
+
 ~~~bash
 $ oc create -f metallb-l2advertisement.yaml
 l2advertisement.metallb.io/advertise-hcp-network created
 ~~~
+
+We can validate the IPAddressPool is available with the following.
 
 ~~~bash
 $ oc get ipaddresspool -n metallb-system -o yaml
@@ -834,6 +874,8 @@ metadata:
   resourceVersion: ""
 ~~~
 
+Now comes the most important part which is the Service.  We need to create an ingress service for our HostedCluster which will request an ipaddress.
+
 ~~~bash
 $ cat <<EOF >hcp-adlink-metallb-ingress.yaml
 kind: Service
@@ -859,12 +901,23 @@ spec:
 EOF
 ~~~
 
+Once we have generated the file we can create it on the cluster.
+
+~~~bash
+$ oc create -f hcp-adlink-metallb-ingress.yaml 
+service/metallb-ingress created
+~~~
+
+We can validate that the Service was created and see what external ipaddress was assigned.  In this case 192.168.0.173 was allocated.  We should ensure we update our DNS records to reflect that *.apps.hcp-adlink.schmaustech.com resolves to that ipaddress.
+
 ~~~bash
 $ oc get service -n openshift-ingress
 NAME                      TYPE           CLUSTER-IP      EXTERNAL-IP     PORT(S)                      AGE
 metallb-ingress           LoadBalancer   172.31.54.206   192.168.0.173   80:31492/TCP,443:30929/TCP   9s
 router-internal-default   ClusterIP      172.31.142.3    <none>          80/TCP,443/TCP,1936/TCP      119m
 ~~~
+
+Now if we go back and look at the cluster operators output again we can see the ingress and console operators have resolved since we added MetalLB, our Service and our DNS records.
 
 ~~~bash
 $ oc get co
@@ -892,6 +945,8 @@ service-ca                                 4.20.13   True        False         F
 storage                                    4.20.13   True        False         False      121m 
 ~~~
 
+We can also test via cli to confirm resolution and service response is working.
+
 ~~~bash
 $ telnet console-openshift-console.apps.hcp-adlink.schmaustech.com 443
 Trying 192.168.0.173...
@@ -902,9 +957,12 @@ telnet> quit
 Connection closed.
 ~~~
 
+Finally if we go back to the HostedCluster output we can see that indeed our hcp-adlink cluster installation has completed.
+
 ~~~bash
 $ oc get hostedcluster -n hcp-adlink
 NAME         VERSION   KUBECONFIG                    PROGRESS    AVAILABLE   PROGRESSING   MESSAGE
 hcp-adlink   4.20.13   hcp-adlink-admin-kubeconfig   Completed   True        False         The hosted control plane is available
 ~~~
 
+Hopefully this provided a detailed explaination on how to prepare a host cluster for hosted control planes and then how to deploy a hosted control plane cluster.  The goal here was to tell the story in an explicit way so people can be successful when using the software.
