@@ -532,7 +532,7 @@ spec:
     networkType: OVNKubernetes
   controllerAvailabilityPolicy: SingleReplica
   infrastructureAvailabilityPolicy: SingleReplica
-  olmCatalogPlacement: guest
+  olmCatalogPlacement: management
   platform:
     type: Agent
     agent:
