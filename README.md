@@ -188,7 +188,7 @@ $ oc create -f provisioning-config.yaml
 provisioning.metal3.io/provisioning-configuration created
 ~~~
 
-Now that hosted control planes are enabled we need to create a AgentServiceConfig custom resource file.  In mine I am defining the specific OpenShift version and architectures I want: 4.20, x86 and Aarch64.
+Now that hosted control planes are enabled we need to create a AgentServiceConfig custom resource file.
 
 ~~~bash
 $ cat <<EOF >agent-service-config.yaml
@@ -202,30 +202,19 @@ spec:
       - ReadWriteOnce
     resources:
       requests:
-        storage: 10Gi
+        storage: 15Gi
   filesystemStorage:
     accessModes:
       - ReadWriteOnce
     resources:
       requests:
-        storage: 10Gi
+        storage: 50Gi
   imageStorage:
     accessModes:
       - ReadWriteOnce
     resources:
       requests:
-        storage: 20Gi
-  osImages:
-    - openshiftVersion: "4.20"
-      version: 9.6.20260107-0
-      url: "https://mirror.openshift.com/pub/openshift-v4/x86_64/dependencies/rhcos/4.20/latest/rhcos-4.20.0-x86_64-live-iso.x86_64.iso"
-      rootFSUrl: "https://mirror.openshift.com/pub/openshift-v4/x86_64/dependencies/rhcos/4.20/latest/rhcos-4.20.0-x86_64-live-rootfs.x86_64.img"
-      cpuArchitecture: "x86_64"
-    - openshiftVersion: "4.20"
-      version: 9.6.20260107-0
-      url: "https://mirror.openshift.com/pub/openshift-v4/aarch64/dependencies/rhcos/4.20/latest/rhcos-4.20.0-aarch64-live-iso.aarch64.iso"
-      rootFSUrl: "https://mirror.openshift.com/pub/openshift-v4/aarch64/dependencies/rhcos/4.20/latest/rhcos-4.20.0-aarch64-live-rootfs.aarch64.img"
-      cpuArchitecture: "aarch64"
+        storage: 50Gi
 EOF
 ~~~
 
@@ -328,7 +317,6 @@ spec:
       matchLabels:	
         infraenvs.agent-install.openshift.io: hcp-adlink
   cpuArchitecture: arm64
-  osImageVersion: '4.20'
 status:
   agentLabelSelector:
     matchLabels:
