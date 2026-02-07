@@ -14,7 +14,7 @@ All of these benefits make HCP an attractive solution for businesses looking to 
 ## Environment
 
 The base environment started with an x86 architecture of OpenShift 4.20.8 installed in a hyperconverged three node control/worker setup on virtual machines.  The environment is depicted in the followng diagram:
-<img src="hosted-cluster.jpg" style="width: 800px;" border=0/>
+<img src="hosted-cluster.jpg" style="width: 1000px;" border=0/>
 These three nodes also have Red Hat OpenShift Data Foundation installed to provide the backing storage for MultiCluster Engine which is the basis for HCP.  Since we are going to be deploying an HCP cluster made up of Arm worker nodes let's first confirm the cluster has multi architecture enabled.
 
 We can confirm multi-archiecture is enabled on OpenShift by running the following command.
